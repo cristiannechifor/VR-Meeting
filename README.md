@@ -5,3 +5,6 @@ https://docs.google.com/document/d/1I8UF_1U6J98LxJ3n7eAd1bT5TTdnXp6VHBWo48GPX2c/
 
 - User flow diagram:
 https://docs.google.com/document/d/17YZm-yIniBlcwccVwNoV1bHi420mcRLVnpzAihjC7-0/edit?usp=sharing
+
+- Build:
+https://github.com/cristiannechifor/VR-Meeting/tree/main/VR%20Education/_build
