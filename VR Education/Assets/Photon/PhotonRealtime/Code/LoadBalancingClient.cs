@@ -139,8 +139,16 @@ namespace Photon.Realtime
     {
         /// <summary>No error was tracked.</summary>
         None,
+
         /// <summary>OnStatusChanged: The server is not available or the address is wrong. Make sure the port is provided and the server is up.</summary>
         ExceptionOnConnect,
+
+        /// <summary>OnStatusChanged: Dns resolution for a hostname failed. The exception for this is being catched and logged with error level.</summary>
+        DnsExceptionOnConnect,
+
+        /// <summary>OnStatusChanged: The server address was parsed as IPv4 illegally. An illegal address would be e.g. 192.168.1.300. IPAddress.TryParse() will let this pass but our check won't.</summary>
+        ServerAddressInvalid,
+
         /// <summary>OnStatusChanged: Some internal exception caused the socket code to fail. This may happen if you attempt to connect locally but the server is not available. In doubt: Contact Exit Games.</summary>
         Exception,
 
@@ -152,15 +160,19 @@ namespace Photon.Realtime
 
         /// <summary>OnStatusChanged: The server disconnected this client from within the room's logic (the C# code).</summary>
         DisconnectByServerLogic,
+
         /// <summary>OnStatusChanged: The server disconnected this client for unknown reasons.</summary>
         DisconnectByServerReasonUnknown,
 
         /// <summary>OnOperationResponse: Authenticate in the Photon Cloud with invalid AppId. Update your subscription or contact Exit Games.</summary>
         InvalidAuthentication,
+
         /// <summary>OnOperationResponse: Authenticate in the Photon Cloud with invalid client values or custom authentication setup in Cloud Dashboard.</summary>
         CustomAuthenticationFailed,
+
         /// <summary>The authentication ticket should provide access to any Photon Cloud server without doing another authentication-service call. However, the ticket expired.</summary>
         AuthenticationTicketExpired,
+
         /// <summary>OnOperationResponse: Authenticate (temporarily) failed when using a Photon Cloud subscription without CCU Burst. Update your subscription.</summary>
         MaxCcuReached,
 
@@ -169,11 +181,12 @@ namespace Photon.Realtime
 
         /// <summary>OnOperationResponse: Operation that's (currently) not available for this client (not authorized usually). Only tracked for op Authenticate.</summary>
         OperationNotAllowedInCurrentState,
+
         /// <summary>OnStatusChanged: The client disconnected from within the logic (the C# code).</summary>
         DisconnectByClientLogic,
 
         /// <summary>The client called an operation too frequently and got disconnected due to hitting the OperationLimit. This triggers a client-side disconnect, too.</summary>
-        /// <summary>To protect the server, some operations have a limit. When an OperationResponse fails with ErrorCode.OperationLimitReached, the client disconnects.</summary>
+        /// <remarks>To protect the server, some operations have a limit. When an OperationResponse fails with ErrorCode.OperationLimitReached, the client disconnects.</remarks>
         DisconnectByOperationLimit,
 
         /// <summary>The client received a "Disconnect Message" from the server. Check the debug logs for details.</summary>
@@ -190,6 +203,15 @@ namespace Photon.Realtime
         GameServer,
         /// <summary>This server is used initially to get the address (IP) of a Master Server for a specific region. Not used for Photon OnPremise (self hosted).</summary>
         NameServer
+    }
+
+    /// <summary>Defines which sort of app the LoadBalancingClient is used for: Realtime or Voice.</summary>
+    public enum ClientAppType
+    {
+        /// <summary>Realtime apps are for gaming / interaction. Also used by PUN 2.</summary>
+        Realtime,
+        /// <summary>Voice apps stream audio.</summary>
+        Voice
     }
 
     /// <summary>
@@ -217,23 +239,6 @@ namespace Photon.Realtime
         /// Datagram Encryption with GCM.
         /// </summary>
         DatagramEncryptionGCM = 13,
-    }
-
-
-    public static class EncryptionDataParameters
-    {
-        /// <summary>
-        /// Key for encryption mode
-        /// </summary>
-        public const byte Mode = 0;
-        /// <summary>
-        /// Key for first secret
-        /// </summary>
-        public const byte Secret1 = 1;
-        /// <summary>
-        /// Key for second secret
-        /// </summary>
-        public const byte Secret2 = 2;
     }
 
     /// <summary>Container for port definitions.</summary>
@@ -301,6 +306,8 @@ namespace Photon.Realtime
         /// <summary>The AppID as assigned from the Photon Cloud. If you host yourself, this is the "regular" Photon Server Application Name (most likely: "LoadBalancing").</summary>
         public string AppId { get; set; }
 
+        /// <summary>The ClientAppType defines which sort of AppId should be expected. The LoadBalancingClient supports Realtime and Voice app types. Default: Realtime.</summary>
+        public ClientAppType ClientType { get; set; }
 
         /// <summary>User authentication values to be sent to the Photon server right after connecting.</summary>
         /// <remarks>Set this property or pass AuthenticationValues by Connect(..., authValues).</remarks>
@@ -716,6 +723,23 @@ namespace Photon.Realtime
         private bool connectToBestRegion = true;
 
 
+        /// <summary>Definition of parameters for encryption data (included in Authenticate operation response).</summary>
+        private class EncryptionDataParameters
+        {
+            /// <summary>
+            /// Key for encryption mode
+            /// </summary>
+            public const byte Mode = 0;
+            /// <summary>
+            /// Key for first secret
+            /// </summary>
+            public const byte Secret1 = 1;
+            /// <summary>
+            /// Key for second secret
+            /// </summary>
+            public const byte Secret2 = 2;
+        }
+
 
         private class CallbackTargetChange
         {
@@ -833,7 +857,7 @@ namespace Photon.Realtime
                 return false;
             }
 
-            this.AppId = appSettings.AppIdRealtime;
+            this.AppId = this.ClientType == ClientAppType.Realtime ? appSettings.AppIdRealtime : appSettings.AppIdVoice;
             this.AppVersion = appSettings.AppVersion;
 
             this.IsUsingNameServer = appSettings.UseNameServer;
@@ -878,7 +902,7 @@ namespace Photon.Realtime
                 this.Server = ServerConnection.MasterServer;
                 int portToUse = appSettings.IsDefaultPort ? 5055 : appSettings.Port;    // TODO: setup new (default) port config
                 this.MasterServerAddress = string.Format("{0}:{1}", appSettings.Server, portToUse);
-                this.SerializationProtocol = SerializationProtocol.GpBinaryV16; // this is a workaround to use On Premises Servers, which don't support GpBinaryV18 yet.
+
                 if (!this.LoadBalancingPeer.Connect(this.MasterServerAddress, this.ProxyServerAddress, this.AppId, this.TokenForInit))
                 {
                     return false;
@@ -918,14 +942,6 @@ namespace Photon.Realtime
         /// </remarks>
         public virtual bool ConnectToMasterServer()
         {
-            // we check if try to connect to a self-hosted Photon Server
-            if (string.IsNullOrEmpty(this.AppId) || !this.IsUsingNameServer)
-            {
-                // this is a workaround to use with version v4.0.29.11263 or lower, which doesn't support GpBinaryV18 yet.
-                this.SerializationProtocol = SerializationProtocol.GpBinaryV16;
-            }
-
-
             this.CheckConnectSetupWebGl();
             this.CheckConnectSetupXboxOne(); // may throw an exception if there are issues that can not be corrected
 
@@ -1075,30 +1091,30 @@ namespace Photon.Realtime
         [Conditional("UNITY_XBOXONE"), Conditional("UNITY_GAMECORE")]
         private void CheckConnectSetupXboxOne()
         {
-            #if UNITY_XBOXONE || UNITY_GAMECORE
+            #if (UNITY_XBOXONE || UNITY_GAMECORE) && !UNITY_EDITOR
             this.AuthMode = AuthModeOption.Auth;
             if (this.AuthValues == null)
             {
-                this.DebugReturn(DebugLevel.ERROR, "UNITY_XBOXONE builds must set AuthValues. Set this before calling any Connect method. Refer to the online docs for guidance.");
-                throw new Exception("UNITY_XBOXONE builds must set AuthValues.");
+                this.DebugReturn(DebugLevel.ERROR, "XBOX builds must set AuthValues. Set this before calling any Connect method. Refer to the online docs for guidance.");
+                throw new Exception("XBOX builds must set AuthValues.");
             }
             if (this.AuthValues.AuthPostData == null)
             {
-                this.DebugReturn(DebugLevel.ERROR,"UNITY_XBOXONE builds must use Photon's XBox Authentication and set the XSTS token by calling: PhotonNetwork.AuthValues.SetAuthPostData(xstsToken). Refer to the online docs for guidance.");
-                throw new Exception("UNITY_XBOXONE builds must use Photon's XBox Authentication.");
+                this.DebugReturn(DebugLevel.ERROR,"XBOX builds must use Photon's XBox Authentication and set the XSTS token by calling: PhotonNetwork.AuthValues.SetAuthPostData(xstsToken). Refer to the online docs for guidance.");
+                throw new Exception("XBOX builds must use Photon's XBox Authentication.");
             }
             if (this.AuthValues.AuthType != CustomAuthenticationType.Xbox)
             {
-                this.DebugReturn(DebugLevel.WARNING, "UNITY_XBOXONE builds must use AuthValues.AuthType \"CustomAuthenticationType.Xbox\". PUN sets this value now. Refer to the online docs to avoid this warning.");
+                this.DebugReturn(DebugLevel.WARNING, "XBOX builds must use AuthValues.AuthType \"CustomAuthenticationType.Xbox\". PUN sets this value now. Refer to the online docs to avoid this warning.");
                 this.AuthValues.AuthType = CustomAuthenticationType.Xbox;
             }
             if (this.LoadBalancingPeer.TransportProtocol != ConnectionProtocol.WebSocketSecure)
             {
-                this.DebugReturn(DebugLevel.INFO, "UNITY_XBOXONE builds must use WSS (Secure WebSockets) as Transport Protocol. Changing the protocol now.");
+                this.DebugReturn(DebugLevel.INFO, "XBOX builds must use WSS (Secure WebSockets) as Transport Protocol. Changing the protocol now.");
                 this.LoadBalancingPeer.TransportProtocol = ConnectionProtocol.WebSocketSecure;
             }
 
-            this.EnableProtocolFallback = false; // no fallback on Xbox One
+            this.EnableProtocolFallback = false; // no transport protocol fallback on XBOX
             #endif
         }
 
@@ -1146,6 +1162,17 @@ namespace Photon.Realtime
         /// <remarks>Common use case: Press the Lock Button on a iOS device and you get disconnected immediately.</remarks>
         public bool ReconnectToMaster()
         {
+            if (string.IsNullOrEmpty(this.MasterServerAddress))
+            {
+                this.DebugReturn(DebugLevel.WARNING, "ReconnectToMaster() failed. MasterServerAddress is null or empty.");
+                return false;
+            }
+            if (this.tokenCache == null)
+            {
+                this.DebugReturn(DebugLevel.WARNING, "ReconnectToMaster() failed. It seems the client doesn't have any previous authentication token to re-connect.");
+                return false;
+            }
+
             if (this.AuthValues == null)
             {
                 this.DebugReturn(DebugLevel.WARNING, "ReconnectToMaster() with AuthValues == null is not correct!");
@@ -1841,6 +1868,8 @@ namespace Photon.Realtime
             }
 
             this.State = ClientState.Leaving;
+            this.GameServerAddress = String.Empty;
+            this.enterRoomParamsCache = null;
             return this.LoadBalancingPeer.OpLeaveRoom(becomeInactive, sendAuthCookie);
         }
 
@@ -2281,7 +2310,7 @@ namespace Photon.Realtime
                 if (this.lastJoinType == JoinType.CreateRoom || (this.lastJoinType == JoinType.JoinOrCreateRoom && this.LocalPlayer.ActorNumber == 1))
                 {
                     this.MatchMakingCallbackTargets.OnCreatedRoom();
-        }
+                }
 
                 this.MatchMakingCallbackTargets.OnJoinedRoom();
             }
@@ -2292,12 +2321,12 @@ namespace Photon.Realtime
         {
             if (actorsInGame != null)
             {
-                foreach (int userId in actorsInGame)
+                foreach (int actorNumber in actorsInGame)
                 {
-                    Player target = this.CurrentRoom.GetPlayer(userId);
+                    Player target = this.CurrentRoom.GetPlayer(actorNumber);
                     if (target == null)
                     {
-                        this.CurrentRoom.StorePlayer(this.CreatePlayer(string.Empty, userId, false, null));
+                        this.CurrentRoom.StorePlayer(this.CreatePlayer(string.Empty, actorNumber, false, null));
                     }
                 }
             }
@@ -2623,7 +2652,7 @@ namespace Photon.Realtime
                             if (this.ServerPortOverrides.MasterServerPort != 0)
                             {
                                 //Debug.LogWarning("Incoming MasterServer Address: "+this.MasterServerAddress);
-                                this.MasterServerAddress = this.ReplacePortWithAlternative(this.MasterServerAddress, this.ServerPortOverrides.MasterServerPort);
+                                this.MasterServerAddress = ReplacePortWithAlternative(this.MasterServerAddress, this.ServerPortOverrides.MasterServerPort);
                                 //Debug.LogWarning("New MasterServer Address: "+this.MasterServerAddress);
                             }
 
@@ -2713,7 +2742,7 @@ namespace Photon.Realtime
                     }
                     if (this.RegionHandler == null)
                     {
-                        this.RegionHandler = new RegionHandler();
+                        this.RegionHandler = new RegionHandler(this.ServerPortOverrides.MasterServerPort);
                     }
 
                     if (this.RegionHandler.IsPinging)
@@ -2761,7 +2790,7 @@ namespace Photon.Realtime
                             if (this.ServerPortOverrides.GameServerPort != 0)
                             {
                                 //Debug.LogWarning("Incoming GameServer Address: " + this.GameServerAddress);
-                                this.GameServerAddress = this.ReplacePortWithAlternative(this.GameServerAddress, this.ServerPortOverrides.GameServerPort);
+                                this.GameServerAddress = ReplacePortWithAlternative(this.GameServerAddress, this.ServerPortOverrides.GameServerPort);
                                 //Debug.LogWarning("New GameServer Address: " + this.GameServerAddress);
                             }
 
@@ -2956,9 +2985,9 @@ namespace Photon.Realtime
                         this.MatchMakingCallbackTargets.OnLeftRoom();
                     }
 
-                    if (this.ExpectedProtocol != null)
+                    if (this.ExpectedProtocol != null && this.LoadBalancingPeer.TransportProtocol != this.ExpectedProtocol)
                     {
-                        this.DebugReturn(DebugLevel.INFO, string.Format("AuthOnceWss mode. On disconnect switches TransportProtocol to ExpectedProtocol: {0}.", this.ExpectedProtocol));
+                        this.DebugReturn(DebugLevel.INFO, string.Format("On disconnect switches TransportProtocol to ExpectedProtocol: {0}.", this.ExpectedProtocol));
                         this.LoadBalancingPeer.TransportProtocol = (ConnectionProtocol)this.ExpectedProtocol;
                         this.ExpectedProtocol = null;
                     }
@@ -3016,6 +3045,14 @@ namespace Photon.Realtime
                 case StatusCode.DisconnectByServerUserLimit:
                     this.DebugReturn(DebugLevel.ERROR, "This connection was rejected due to the apps CCU limit.");
                     this.DisconnectedCause = DisconnectCause.MaxCcuReached;
+                    this.State = ClientState.Disconnecting;
+                    break;
+                case StatusCode.DnsExceptionOnConnect:
+                    this.DisconnectedCause = DisconnectCause.DnsExceptionOnConnect;
+                    this.State = ClientState.Disconnecting;
+                    break;
+                case StatusCode.ServerAddressInvalid:
+                    this.DisconnectedCause = DisconnectCause.ServerAddressInvalid;
                     this.State = ClientState.Disconnecting;
                     break;
                 case StatusCode.ExceptionOnConnect:
@@ -3081,7 +3118,6 @@ namespace Photon.Realtime
             {
                 case EventCode.GameList:
                 case EventCode.GameListUpdate:
-
                     List<RoomInfo> _RoomInfoList = new List<RoomInfo>();
 
                     Hashtable games = (Hashtable)photonEvent[ParameterCode.GameList];
@@ -3280,7 +3316,7 @@ namespace Photon.Realtime
         }
 
 
-        private string ReplacePortWithAlternative(string address, ushort replacementPort)
+        protected internal static string ReplacePortWithAlternative(string address, ushort replacementPort)
         {
             bool webSocket = address.StartsWith("ws");
             if (webSocket)

@@ -210,7 +210,7 @@ namespace Photon.Pun.Simple
 
                 //Debug.LogError(Time.time + " SYNC_OWN Apply newOwner? " + (pendingOwner == null ? "null" : pendingOwnerId.ToString()));
 
-                photonView.SetOwnerInternal(pendingOwner, pendingOwnerId);
+                //photonView.SetOwnerInternal(pendingOwner, pendingOwnerId);
                
             }
 

@@ -64,7 +64,7 @@ namespace Photon.Pun
     public static partial class PhotonNetwork
     {
         /// <summary>Version number of PUN. Used in the AppVersion, which separates your playerbase in matchmaking.</summary>
-        public const string PunVersion = "2.26.1";
+        public const string PunVersion = "2.29";
 
         /// <summary>Version number of your game. Setting this updates the AppVersion, which separates your playerbase in matchmaking.</summary>
         /// <remarks>
@@ -250,7 +250,17 @@ namespace Photon.Pun
 
         /// <summary>The server (type) this client is currently connected or connecting to.</summary>
         /// <remarks>Photon uses 3 different roles of servers: Name Server, Master Server and Game Server.</remarks>
-        public static ServerConnection Server { get { return (PhotonNetwork.NetworkingClient != null) ? PhotonNetwork.NetworkingClient.Server : ServerConnection.NameServer; } }
+        public static ServerConnection Server
+        {
+            get
+            {
+                if (OfflineMode)
+                {
+                    return CurrentRoom == null ? ServerConnection.MasterServer : ServerConnection.GameServer;
+                }
+                return (PhotonNetwork.NetworkingClient != null) ? PhotonNetwork.NetworkingClient.Server : ServerConnection.NameServer;
+            }
+        }
 
         /// <summary>
         /// A user's authentication values used during connect.
@@ -321,7 +331,7 @@ namespace Photon.Pun
             {
                 if (NetworkingClient == null)
                 {
-                    return null; // Surpress ExitApplication errors
+                    return null; // suppress ExitApplication errors
                 }
 
                 return NetworkingClient.LocalPlayer;
@@ -550,7 +560,7 @@ namespace Photon.Pun
         /// into a datagram to be sent. This is implemented in the PhotonHandler component, which integrates PUN
         /// into the Unity game loop.
         /// The PhotonHandler.MaxDatagrams value defines how many datagrams can be sent in one iteration.
-        /// 
+        ///
         /// This value does not affect how often updates are written by PhotonViews. That is controlled by the
         /// SerializationRate. To avoid send-delays for PhotonView updates, PUN will also send data at the end
         /// of frames that wrote data in OnPhotonSerializeView, so sending may actually be more frequent than
@@ -594,15 +604,15 @@ namespace Photon.Pun
         /// <remarks>
         /// This value defines how often PUN will call OnPhotonSerialize on controlled network objects.
         /// This is implemented in the PhotonHandler component, which integrates PUN into the Unity game loop.
-        /// 
+        ///
         /// The updates written in OnPhotonSerialize will be queued temporarily and sent in the next LateUpdate,
         /// so a high SerializationRate also causes more sends. The idea is to keep the delay short during
         /// which written updates are queued.
         ///
         /// Calling RPCs will not trigger a send.
-        /// 
+        ///
         /// A low framerate will affect how frequent updates are written and how "on time" they are.
-        /// 
+        ///
         /// A lower rate takes up less performance but the receiving side needs to interpolate longer times
         /// between updates.
         /// </remarks>
@@ -1019,6 +1029,7 @@ namespace Photon.Pun
             monoRPCMethodsCache.Clear();
 
             // set up the NetworkingClient, protocol, etc
+            OfflineMode = false;
             ConnectionProtocol protocol = PhotonNetwork.PhotonServerSettings.AppSettings.Protocol;
             NetworkingClient = new LoadBalancingClient(protocol);
             NetworkingClient.LoadBalancingPeer.QuickResendAttempts = 2;
@@ -1143,7 +1154,6 @@ namespace Photon.Pun
 
             if (appSettings.IsMasterServerAddress)
             {
-                NetworkingClient.SerializationProtocol = SerializationProtocol.GpBinaryV16;   // this is a workaround to use On Premises Servers, which don't support GpBinaryV18 yet.
                 if (AuthValues == null)
                 {
                     AuthValues = new AuthenticationValues(Guid.NewGuid().ToString());
@@ -1921,8 +1931,8 @@ namespace Photon.Pun
             if (OfflineMode)
             {
                 offlineModeRoom = null;
-                //SendMonoMessage(PhotonNetworkingMessage.OnLeftRoom);
                 NetworkingClient.MatchMakingCallbackTargets.OnLeftRoom();
+                NetworkingClient.ConnectionCallbackTargets.OnConnectedToMaster();
             }
             else
             {
@@ -2521,14 +2531,14 @@ namespace Photon.Pun
 
                 var view = photonViews[i];
 
-                view.didAwake = false;
                 view.ViewID = 0;
+                view.sceneViewId = 0;
+                view.isRuntimeInstantiated = true;
+                view.lastOnSerializeDataSent = null;
+                view.lastOnSerializeDataReceived = null;
                 view.Prefix = parameters.objLevelPrefix;
                 view.InstantiationId = parameters.viewIDs[0];
-                view.isRuntimeInstantiated = true;
                 view.InstantiationData = parameters.data;
-                view.ownershipCacheIsValid = PhotonView.OwnershipCacheState.Invalid;
-                view.didAwake = true;
                 view.ViewID = parameters.viewIDs[i];    // with didAwake true and viewID == 0, this will also register the view
 
                 view.Group = parameters.group;

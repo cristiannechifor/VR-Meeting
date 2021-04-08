@@ -482,7 +482,7 @@ namespace Photon.Pun.Simple
 #if UNITY_EDITOR || DEVELOPMENT_BUILD
                         Debug.Log(pv.name + ":" + pv.ViewID + " OwnershipUpdate has not yet arrived from master, so owner is still unknown. Accepting update from Actor " + connId + " as temporary controller until OwnershipUpdate arrives and sets the Owner/Controller.");
 #endif
-                        pv.SetControllerInternal(connId);
+                        //pv.SetControllerInternal(connId);
                     }
                     else if (controllerActorNr != connId && ownerActorNr != connId)
                     {

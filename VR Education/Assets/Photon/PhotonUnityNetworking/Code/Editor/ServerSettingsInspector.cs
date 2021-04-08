@@ -17,6 +17,8 @@ using Photon.Pun;
 using ExitGames.Client.Photon;
 using System.Collections.Generic;
 using System.Reflection;
+using Photon.Realtime;
+
 
 [CustomEditor(typeof(ServerSettings))]
 public class ServerSettingsInspector : Editor
@@ -70,14 +72,14 @@ public class ServerSettingsInspector : Editor
 
         EditorGUI.indentLevel--;
         SerializedProperty showSettingsProp = this.serializedObject.FindProperty("ShowSettings");
-        bool showSettings = showSettingsProp.Foldout(new GUIContent("Server/Cloud Settings", "Core Photon Server/Cloud settings."));
+        //bool showSettings = showSettingsProp.Foldout(new GUIContent("Server/Cloud Settings", "Core Photon Server/Cloud settings."));
         EditorGUI.indentLevel++;
 
 
-        if (showSettings != settings.ShowSettings)
-        {
-            showSettingsProp.boolValue = showSettings;
-        }
+        //if (showSettings != settings.ShowSettings)
+        //{
+        //    showSettingsProp.boolValue = showSettings;
+        //}
 
         if (showSettingsProp.boolValue)
         {
@@ -163,7 +165,7 @@ public class ServerSettingsInspector : Editor
 
         //this.showRpcs = EditorGUILayout.Foldout(this.showRpcs, new GUIContent("RPCs", "RPC shortcut list."));
         EditorGUI.indentLevel--;
-        this.showRpcs = this.showRpcs.Foldout(new GUIContent("RPCs", "RPC shortcut list."));
+        //this.showRpcs = this.showRpcs.Foldout(new GUIContent("RPCs", "RPC shortcut list."));
         EditorGUI.indentLevel++;
 
         if (this.showRpcs)
@@ -300,8 +302,11 @@ public class ServerSettingsInspector : Editor
             EditorGUILayout.PropertyField(property, GUILayout.MinWidth(32));
         }
 
+        property.stringValue = property.stringValue.Trim();
         string appId = property.stringValue;
+
         string url = "https://dashboard.photonengine.com/en-US/PublicCloud";
+
         if (!string.IsNullOrEmpty(appId))
         {
             url = string.Format("https://dashboard.photonengine.com/en-US/App/Manage/{0}", appId);
